@@ -191,7 +191,7 @@ class CachedMambaEmbeddingDatasetXYFusedHint(Dataset):
 def load_video_path_lookup_xy(fold: int, split_dir: str = None) -> dict:
     val_csv = os.path.join(split_dir or SPLIT_DIR, f"fold_{fold}_val.csv")
     df = pd.read_csv(val_csv)
-    return dict(zip(df["video_id"], df["video_path"]))
+    return dict(zip(df["video_id"], df["video_path"].apply(lambda p: os.path.join(ROOT, p))))
 
 
 def train_cached_mamba_fold_xy_fused_hint(fold: int, cfg: dict, device: torch.device):

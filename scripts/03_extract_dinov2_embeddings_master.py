@@ -119,7 +119,7 @@ def main():
     n_total = len(videos) * 2
     n_done = 0
     for _, row in videos.iterrows():
-        video_id, video_path = row["video_id"], row["video_path"]
+        video_id, video_path = row["video_id"], os.path.join(ROOT, row["video_path"])
         raw_frames = sample_frames(video_path)
         for variant, mirror in (("clean", False), ("mirror", True)):
             out_path = os.path.join(CACHE_DIR, f"{safe_name(video_id)}__{variant}.pt")

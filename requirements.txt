@@ -1,0 +1,11 @@
+torch
+opencv-python
+numpy
+pandas
+scikit-learn
+matplotlib
+openpyxl
+joblib
+# optional: fast CUDA Mamba kernel -- code falls back to a pure-PyTorch
+# Mamba block automatically if this isn't installed or fails to build
+mamba_ssm
