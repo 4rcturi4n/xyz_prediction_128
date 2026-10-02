@@ -1,0 +1,13 @@
+{
+  "num_frames": 128,
+  "image_size": 224,
+  "skip_seconds": 2.0,
+  "crop_box": [
+    1049,
+    337,
+    1831,
+    915
+  ],
+  "dinov2_model": "dinov2_vits14",
+  "n_videos": 106
+}

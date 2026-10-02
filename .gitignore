@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 .ipynb_checkpoints
+
+# local junction to the actual video files (6+ GB), not real repo content
+data/Early prediction/
