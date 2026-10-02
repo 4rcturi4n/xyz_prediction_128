@@ -5,8 +5,9 @@
 # axis) per epoch, dotted line at the epoch early stopping kept.
 #
 # x/y models show val MAE for x and y as separate lines (never averaged in the
-# plot); the "best" epoch is still picked with the criterion the training loop
-# used (val_mae_combined for x/y, val_mae for z).
+# plot, and never computed anywhere); the "best" epoch for x/y models is
+# marked using val MAE x alone (a visual aid only, matching the fallback
+# already built into extra_plots.plot_learning_curve), not a combined metric.
 #
 # Reads:  results/<run>/history_all_folds.csv
 # Writes: results/<run>/learning_curves.png
@@ -31,8 +32,7 @@ RESULTS = os.path.join(ROOT, "results")
 def val_series(history):
     """[(column, label)] to plot, and the early-stopping criterion column."""
     if "final_mae_x_phys" in history:
-        criterion = next(c for c in ("val_mae_combined_smoothed", "val_mae_combined") if c in history)
-        return [("final_mae_x_phys", "val MAE x"), ("final_mae_y_phys", "val MAE y")], criterion
+        return [("final_mae_x_phys", "val MAE x"), ("final_mae_y_phys", "val MAE y")], "final_mae_x_phys"
     return [("final_mae_z_phys", "val MAE z")], "val_mae"
 
 

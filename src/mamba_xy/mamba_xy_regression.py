@@ -714,29 +714,24 @@ def train_cached_mamba_fold_xy(fold: int, cfg: dict, device: torch.device):
                 "target_y_mean": target_y_mean, "target_y_std": target_y_std,
                 "power_mean": train_dataset.power_mean, "power_std": train_dataset.power_std,
                 "i_th": i_th,
-                "best_val_mae_combined": best_val_mae,
             }, os.path.join(out_dir, "model_best.pth"))
             mae_per_t_df.to_csv(os.path.join(out_dir, "mae_per_timestep.csv"), index=False)
-            ept_df.to_csv(os.path.join(out_dir, "ept_summary.csv"), index=False)
         else:
             epochs_no_imp += 1
 
         history.append({
             "fold": fold, "epoch": epoch, "train_loss": train_loss,
             **val_metrics,
-            "val_mae_combined": current_mae,
-            "best_val_mae_combined_so_far": best_val_mae,
             "improved": improved,
             "epochs_without_improvement": epochs_no_imp,
         })
 
         print(f"Fold {fold} | Epoch {epoch:03d} | train_loss={train_loss:.5f} | "
               f"mae_x={val_metrics['final_mae_x_phys']:.5f} | mae_y={val_metrics['final_mae_y_phys']:.5f} | "
-              f"combined={current_mae:.5f} | best={best_val_mae:.5f} | "
               f"no_improve={epochs_no_imp}/{cfg['early_stopping_patience']}")
 
         if epochs_no_imp >= cfg["early_stopping_patience"]:
-            print(f"Early stopping fold {fold} at epoch {epoch}. Best epoch: {best_epoch}, combined MAE: {best_val_mae:.5f}")
+            print(f"Early stopping fold {fold} at epoch {epoch}. Best epoch: {best_epoch}")
             break
 
     pd.DataFrame(history).to_csv(os.path.join(out_dir, "history.csv"), index=False)
@@ -752,10 +747,8 @@ def train_cached_mamba_fold_xy(fold: int, cfg: dict, device: torch.device):
     )
     per_video_df.to_csv(os.path.join(out_dir, "val_predictions_per_timestep.csv"), index=False)
     mae_per_t_df.to_csv(os.path.join(out_dir, "mae_per_timestep.csv"), index=False)
-    ept_df.to_csv(os.path.join(out_dir, "ept_summary.csv"), index=False)
 
     plot_mae_curve_xy(mae_per_t_df, os.path.join(out_dir, "mae_curve.png"), fold)
-    plot_ept_distribution_xy(ept_df, os.path.join(out_dir, "ept_distribution.png"), fold, cfg["ept_threshold_um"])
     x_bw_lookup, y_bw_lookup = load_bandwidth_lookup_xy()
     video_power_lookup = load_video_power_lookup_xy(fold, split_dir=cfg.get("split_dir"))
     plot_video_trajectories_xy(
@@ -770,15 +763,12 @@ def train_cached_mamba_fold_xy(fold: int, cfg: dict, device: torch.device):
         "i_th_mW": i_th,
         "best_val_mae_x_phys": float(best_val_metrics["final_mae_x_phys"]),
         "best_val_mae_y_phys": float(best_val_metrics["final_mae_y_phys"]),
-        "best_val_mae_combined": float(best_val_mae),
         "best_val_mae_std_x_phys": float(best_val_metrics["final_mae_std_x_phys"]),
         "best_val_mae_std_y_phys": float(best_val_metrics["final_mae_std_y_phys"]),
         "best_val_rmse_x_phys": float(best_val_metrics["final_rmse_x_phys"]),
         "best_val_rmse_y_phys": float(best_val_metrics["final_rmse_y_phys"]),
         "best_val_bias_x_phys": float(best_val_metrics["final_bias_x_phys"]),
         "best_val_bias_y_phys": float(best_val_metrics["final_bias_y_phys"]),
-        "mean_ept_pct": float(best_val_metrics["mean_ept_pct"]),
-        "pct_videos_ept_found": float(best_val_metrics["pct_videos_ept_found"]),
         "num_train_rows": len(train_dataset),
         "num_val": len(val_dataset),
     }
@@ -875,29 +865,24 @@ def train_cached_mamba_fold_xy_video_only(fold: int, cfg: dict, device: torch.de
                 "cfg": cfg,
                 "target_x_mean": target_x_mean, "target_x_std": target_x_std,
                 "target_y_mean": target_y_mean, "target_y_std": target_y_std,
-                "best_val_mae_combined": best_val_mae,
             }, os.path.join(out_dir, "model_best.pth"))
             mae_per_t_df.to_csv(os.path.join(out_dir, "mae_per_timestep.csv"), index=False)
-            ept_df.to_csv(os.path.join(out_dir, "ept_summary.csv"), index=False)
         else:
             epochs_no_imp += 1
 
         history.append({
             "fold": fold, "epoch": epoch, "train_loss": train_loss,
             **val_metrics,
-            "val_mae_combined": current_mae,
-            "best_val_mae_combined_so_far": best_val_mae,
             "improved": improved,
             "epochs_without_improvement": epochs_no_imp,
         })
 
         print(f"Fold {fold} | Epoch {epoch:03d} | train_loss={train_loss:.5f} | "
               f"mae_x={val_metrics['final_mae_x_phys']:.5f} | mae_y={val_metrics['final_mae_y_phys']:.5f} | "
-              f"combined={current_mae:.5f} | best={best_val_mae:.5f} | "
               f"no_improve={epochs_no_imp}/{cfg['early_stopping_patience']}")
 
         if epochs_no_imp >= cfg["early_stopping_patience"]:
-            print(f"Early stopping fold {fold} at epoch {epoch}. Best epoch: {best_epoch}, combined MAE: {best_val_mae:.5f}")
+            print(f"Early stopping fold {fold} at epoch {epoch}. Best epoch: {best_epoch}")
             break
 
     pd.DataFrame(history).to_csv(os.path.join(out_dir, "history.csv"), index=False)
@@ -913,10 +898,8 @@ def train_cached_mamba_fold_xy_video_only(fold: int, cfg: dict, device: torch.de
     )
     per_video_df.to_csv(os.path.join(out_dir, "val_predictions_per_timestep.csv"), index=False)
     mae_per_t_df.to_csv(os.path.join(out_dir, "mae_per_timestep.csv"), index=False)
-    ept_df.to_csv(os.path.join(out_dir, "ept_summary.csv"), index=False)
 
     plot_mae_curve_xy(mae_per_t_df, os.path.join(out_dir, "mae_curve.png"), fold)
-    plot_ept_distribution_xy(ept_df, os.path.join(out_dir, "ept_distribution.png"), fold, cfg["ept_threshold_um"])
     x_bw_lookup, y_bw_lookup = load_bandwidth_lookup_xy()
     video_power_lookup = load_video_power_lookup_xy(fold, split_dir=cfg.get("split_dir"))
     plot_video_trajectories_xy(
@@ -931,15 +914,12 @@ def train_cached_mamba_fold_xy_video_only(fold: int, cfg: dict, device: torch.de
         "i_th_mW": i_th,
         "best_val_mae_x_phys": float(best_val_metrics["final_mae_x_phys"]),
         "best_val_mae_y_phys": float(best_val_metrics["final_mae_y_phys"]),
-        "best_val_mae_combined": float(best_val_mae),
         "best_val_mae_std_x_phys": float(best_val_metrics["final_mae_std_x_phys"]),
         "best_val_mae_std_y_phys": float(best_val_metrics["final_mae_std_y_phys"]),
         "best_val_rmse_x_phys": float(best_val_metrics["final_rmse_x_phys"]),
         "best_val_rmse_y_phys": float(best_val_metrics["final_rmse_y_phys"]),
         "best_val_bias_x_phys": float(best_val_metrics["final_bias_x_phys"]),
         "best_val_bias_y_phys": float(best_val_metrics["final_bias_y_phys"]),
-        "mean_ept_pct": float(best_val_metrics["mean_ept_pct"]),
-        "pct_videos_ept_found": float(best_val_metrics["pct_videos_ept_found"]),
         "num_train_rows": len(train_dataset),
         "num_val": len(val_dataset),
     }
