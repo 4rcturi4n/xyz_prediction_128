@@ -1,0 +1,14 @@
+{
+  "fold": 1,
+  "best_epoch": 3,
+  "best_val_mae_x_phys": 0.08809181302785873,
+  "best_val_mae_y_phys": 0.06492118537425995,
+  "best_val_mae_std_x_phys": 0.10816430300474167,
+  "best_val_mae_std_y_phys": 0.08667005598545074,
+  "best_val_rmse_x_phys": 0.1394979760094081,
+  "best_val_rmse_y_phys": 0.10828878251968319,
+  "best_val_bias_x_phys": 0.037049539387226105,
+  "best_val_bias_y_phys": 0.022322913631796837,
+  "num_train_rows": 170,
+  "num_val": 21
+}

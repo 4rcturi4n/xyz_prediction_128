@@ -1,0 +1,67 @@
+{
+  "n_splits": 5,
+  "mean_best_val_mae_z_phys": 0.028012079000473023,
+  "std_best_val_mae_z_phys": 0.0053377480737391535,
+  "folds": [
+    {
+      "fold": 1,
+      "best_epoch": 88,
+      "best_val_mae_z_phys": 0.037341658025979996,
+      "best_val_mae_std_z_phys": 0.05665187910199165,
+      "best_val_rmse_z_phys": 0.06785156463025693,
+      "best_val_bias_z_phys": 0.011690860614180565,
+      "mean_ept_pct": 32.69591301087364,
+      "pct_videos_ept_found": 76.19047619047619,
+      "num_train_rows": 170,
+      "num_val": 21
+    },
+    {
+      "fold": 2,
+      "best_epoch": 49,
+      "best_val_mae_z_phys": 0.02545732632279396,
+      "best_val_mae_std_z_phys": 0.029145535081624985,
+      "best_val_rmse_z_phys": 0.03869803090793164,
+      "best_val_bias_z_phys": 0.0021895114332437515,
+      "mean_ept_pct": 39.40757405324335,
+      "pct_videos_ept_found": 95.23809523809523,
+      "num_train_rows": 170,
+      "num_val": 21
+    },
+    {
+      "fold": 3,
+      "best_epoch": 31,
+      "best_val_mae_z_phys": 0.02105909027159214,
+      "best_val_mae_std_z_phys": 0.019301919266581535,
+      "best_val_rmse_z_phys": 0.028566576397875645,
+      "best_val_bias_z_phys": 0.006968183908611536,
+      "mean_ept_pct": 38.18897637795276,
+      "pct_videos_ept_found": 90.9090909090909,
+      "num_train_rows": 168,
+      "num_val": 22
+    },
+    {
+      "fold": 4,
+      "best_epoch": 24,
+      "best_val_mae_z_phys": 0.027586357668042183,
+      "best_val_mae_std_z_phys": 0.03287721425294876,
+      "best_val_rmse_z_phys": 0.042917571963664025,
+      "best_val_bias_z_phys": -0.011687926016747952,
+      "mean_ept_pct": 40.83239595050619,
+      "pct_videos_ept_found": 85.71428571428571,
+      "num_train_rows": 170,
+      "num_val": 21
+    },
+    {
+      "fold": 5,
+      "best_epoch": 21,
+      "best_val_mae_z_phys": 0.028615962713956833,
+      "best_val_mae_std_z_phys": 0.024800168350338936,
+      "best_val_rmse_z_phys": 0.03786715918902517,
+      "best_val_bias_z_phys": 0.013189462944865227,
+      "mean_ept_pct": 52.1559805024372,
+      "pct_videos_ept_found": 80.95238095238095,
+      "num_train_rows": 170,
+      "num_val": 21
+    }
+  ]
+}

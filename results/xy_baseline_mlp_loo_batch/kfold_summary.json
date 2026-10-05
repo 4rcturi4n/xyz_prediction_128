@@ -1,0 +1,64 @@
+{
+  "n_splits": 6,
+  "model": "small ReLU MLP, hint sqrt(ln(P)), no P_th",
+  "mean_val_mae_x_phys": 0.03288234017478923,
+  "std_val_mae_x_phys": 0.02239780441341047,
+  "mean_val_mae_y_phys": 0.021968985131631296,
+  "std_val_mae_y_phys": 0.01284214548911968,
+  "folds": [
+    {
+      "fold": 1,
+      "n_train": 93,
+      "n_val": 13,
+      "val_mae_x_phys": 0.02090001478791237,
+      "val_rmse_x_phys": 0.025272706515384758,
+      "val_mae_y_phys": 0.04037068784236908,
+      "val_rmse_y_phys": 0.050416348327188006
+    },
+    {
+      "fold": 2,
+      "n_train": 89,
+      "n_val": 17,
+      "val_mae_x_phys": 0.006456801202148199,
+      "val_rmse_x_phys": 0.008456532544018886,
+      "val_mae_y_phys": 0.011268649250268936,
+      "val_rmse_y_phys": 0.013879536826780711
+    },
+    {
+      "fold": 3,
+      "n_train": 90,
+      "n_val": 16,
+      "val_mae_x_phys": 0.07044459879398346,
+      "val_rmse_x_phys": 0.10881345790411824,
+      "val_mae_y_phys": 0.03846054524183273,
+      "val_rmse_y_phys": 0.06511991389882306
+    },
+    {
+      "fold": 4,
+      "n_train": 86,
+      "n_val": 20,
+      "val_mae_x_phys": 0.010861853137612343,
+      "val_rmse_x_phys": 0.012273059132684998,
+      "val_mae_y_phys": 0.014110083691775799,
+      "val_rmse_y_phys": 0.015664146603265754
+    },
+    {
+      "fold": 5,
+      "n_train": 87,
+      "n_val": 19,
+      "val_mae_x_phys": 0.04664244502782822,
+      "val_rmse_x_phys": 0.05547037432871228,
+      "val_mae_y_phys": 0.007916809991002083,
+      "val_rmse_y_phys": 0.011499376276397875
+    },
+    {
+      "fold": 6,
+      "n_train": 85,
+      "n_val": 21,
+      "val_mae_x_phys": 0.04198832809925079,
+      "val_rmse_x_phys": 0.044358446692306604,
+      "val_mae_y_phys": 0.01968713477253914,
+      "val_rmse_y_phys": 0.02298724924305532
+    }
+  ]
+}

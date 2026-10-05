@@ -4,3 +4,4 @@ __pycache__/
 
 # local junction to the actual video files (6+ GB), not real repo content
 data/Early prediction/
+xyz_prediction_128/Untitled.ipynb
