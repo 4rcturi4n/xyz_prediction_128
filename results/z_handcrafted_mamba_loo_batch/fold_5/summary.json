@@ -1,0 +1,13 @@
+{
+  "fold": 5,
+  "best_epoch": 15,
+  "best_val_mae_z_phys": 0.26313647627830505,
+  "best_val_mae_std_z_phys": 0.3277263641357422,
+  "best_val_rmse_z_phys": 0.42029203911084684,
+  "best_val_bias_z_phys": 0.11203311383724213,
+  "mean_ept_pct": 99.83423124740986,
+  "pct_videos_ept_found": 42.10526315789473,
+  "num_train_rows": 174,
+  "num_val": 19,
+  "i_th_mW": 3.4155143232284892
+}
