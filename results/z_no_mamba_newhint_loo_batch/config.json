@@ -1,0 +1,17 @@
+{
+  "n_splits": 6,
+  "hidden_dim": 128,
+  "dropout": 0.3,
+  "batch_size": 4,
+  "epochs": 100,
+  "lr": 0.001,
+  "weight_decay": 0.0003,
+  "early_stopping_patience": 15,
+  "min_delta": 0.0,
+  "ept_threshold_um": 0.05,
+  "max_trajectory_plots": 10,
+  "seed": 42,
+  "embeddings_dir": "/files/private/notebooks/xyz_prediction_128/results/dinov2_embeddings_z_loo_batch_with_power",
+  "out_dir": "/files/private/notebooks/xyz_prediction_128/results/z_no_mamba_newhint_loo_batch",
+  "split_dir": "/files/private/notebooks/xyz_prediction_128/data/processed/kfold_splits_z_loo_batch"
+}

@@ -1,0 +1,56 @@
+{
+  "n_splits": 6,
+  "model": "small ReLU MLP, hint sqrt(sqrt(ln(P/I_th))-1), I_th fit per fold",
+  "mean_val_mae_z_phys": 0.02305514272302389,
+  "std_val_mae_z_phys": 0.011318540111259991,
+  "folds": [
+    {
+      "fold": 1,
+      "n_train": 93,
+      "n_val": 13,
+      "i_th_mW": 0.7370634520279659,
+      "val_mae_z_phys": 0.01114141009747982,
+      "val_rmse_z_phys": 0.01312800338809276
+    },
+    {
+      "fold": 2,
+      "n_train": 89,
+      "n_val": 17,
+      "i_th_mW": 0.8658942355830884,
+      "val_mae_z_phys": 0.02477596141397953,
+      "val_rmse_z_phys": 0.03751369954996602
+    },
+    {
+      "fold": 3,
+      "n_train": 90,
+      "n_val": 16,
+      "i_th_mW": 0.6857708806482358,
+      "val_mae_z_phys": 0.012171879410743713,
+      "val_rmse_z_phys": 0.014539398731294078
+    },
+    {
+      "fold": 4,
+      "n_train": 86,
+      "n_val": 20,
+      "i_th_mW": 0.7780246817547823,
+      "val_mae_z_phys": 0.04415581375360489,
+      "val_rmse_z_phys": 0.04987428281188937
+    },
+    {
+      "fold": 5,
+      "n_train": 87,
+      "n_val": 19,
+      "i_th_mW": 0.6842592823386312,
+      "val_mae_z_phys": 0.017562301829457283,
+      "val_rmse_z_phys": 0.02521580566843715
+    },
+    {
+      "fold": 6,
+      "n_train": 85,
+      "n_val": 21,
+      "i_th_mW": 0.6812614641324821,
+      "val_mae_z_phys": 0.028523489832878113,
+      "val_rmse_z_phys": 0.03901407995953502
+    }
+  ]
+}
