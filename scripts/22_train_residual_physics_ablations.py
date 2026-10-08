@@ -1,12 +1,12 @@
 # scripts/22_train_residual_physics_ablations.py
 #
 # Four ideas to help the video pathway beat/match the baseline MLP,
-# each built as a separate, isolated ablation on top of the z
-# residual-physics model (z only, 5-fold only -- fastest to validate;
-# extend to x/y and loo-batch once we know which ones are worth it):
+# each built as a separate, isolated ablation on top of the
+# residual-physics model, for BOTH x/y and z (5-fold only so far --
+# extend to loo-batch once we know which ones are worth it):
 #
-#   1) learned shrinkage  -- fit a single scalar alpha (OLS, leak-free
-#      train holdout) on how much to trust the residual correction.
+#   1) learned shrinkage  -- fit scalar alpha(s) (OLS, leak-free train
+#      holdout) on how much to trust the residual correction.
 #   2) simplified architecture -- same residual-physics setup, smaller
 #      model + more regularization (less capacity to overfit on ~85
 #      train videos/fold).
@@ -16,6 +16,8 @@
 #      next-embedding prediction (no labels) on that fold's train
 #      embeddings before residual fine-tuning.
 #
+# All use the joint shared-I_th physics fit (one I_th across x/y/z),
+# so every xy run also cross-loads the matched z fold and vice versa.
 # Same full reporting suite (MAE, EPT, learning curves) as every other
 # model in the repo.
 
@@ -39,6 +41,10 @@ from mamba_xy.residual_physics import (
     train_cached_mamba_fold_z_residual,
     train_cached_mamba_fold_z_residual_attnpool,
     train_cached_mamba_fold_z_residual_pretrained,
+    train_cached_mamba_fold_xy_residual_shrinkage,
+    train_cached_mamba_fold_xy_residual,
+    train_cached_mamba_fold_xy_residual_attnpool,
+    train_cached_mamba_fold_xy_residual_pretrained,
 )
 
 BASE_CFG = {
@@ -65,14 +71,23 @@ PRETRAINED_CFG_OVERRIDES = {
 }
 
 
-def run(out_dir_name, train_fn, cfg_overrides=None):
+def run(axis, out_dir_name, train_fn, mae_keys, cfg_overrides=None):
+    """axis: 'z' or 'xy'. Each cross-loads the matched fold of the other
+    axis for the joint shared-I_th physics fit."""
     cfg = deepcopy(BASE_CFG)
     if cfg_overrides:
         cfg.update(cfg_overrides)
-    cfg["embeddings_dir"] = os.path.join(ROOT, "results", "dinov2_embeddings_z_with_power")
-    cfg["xy_embeddings_dir"] = os.path.join(ROOT, "results", "dinov2_embeddings_xy_with_power")
+    if axis == "z":
+        cfg["embeddings_dir"] = os.path.join(ROOT, "results", "dinov2_embeddings_z_with_power")
+        cfg["xy_embeddings_dir"] = os.path.join(ROOT, "results", "dinov2_embeddings_xy_with_power")
+        cfg["split_dir"] = os.path.join(ROOT, "data", "processed", "kfold_splits_z")
+    elif axis == "xy":
+        cfg["embeddings_dir"] = os.path.join(ROOT, "results", "dinov2_embeddings_xy_with_power")
+        cfg["z_embeddings_dir"] = os.path.join(ROOT, "results", "dinov2_embeddings_z_with_power")
+        cfg["split_dir"] = os.path.join(ROOT, "data", "processed", "kfold_splits_xy")
+    else:
+        raise ValueError(axis)
     cfg["out_dir"] = os.path.join(ROOT, "results", out_dir_name)
-    cfg["split_dir"] = os.path.join(ROOT, "data", "processed", "kfold_splits_z")
     set_seed(cfg["seed"])
     os.makedirs(cfg["out_dir"], exist_ok=True)
     with open(os.path.join(cfg["out_dir"], "config.json"), "w", encoding="utf-8") as f:
@@ -93,22 +108,32 @@ def run(out_dir_name, train_fn, cfg_overrides=None):
     summary_df = pd.DataFrame(summaries)
     summary_df.to_csv(os.path.join(cfg["out_dir"], "mamba_cached_summary.csv"), index=False)
 
-    key = "best_val_mae_z_phys"
-    vals = summary_df[key].values
-    final = {
-        "n_splits": cfg["n_splits"], f"mean_{key}": float(np.mean(vals)), f"std_{key}": float(np.std(vals)),
-        "folds": summaries,
-    }
+    final = {"n_splits": cfg["n_splits"]}
+    for key in mae_keys:
+        vals = summary_df[key].values
+        final[f"mean_{key}"] = float(np.mean(vals))
+        final[f"std_{key}"] = float(np.std(vals))
+    final["folds"] = summaries
     with open(os.path.join(cfg["out_dir"], "kfold_summary.json"), "w", encoding="utf-8") as f:
         json.dump(final, f, indent=2)
-    print(f"{key}: {final[f'mean_{key}']:.5f} +/- {final[f'std_{key}']:.5f}")
+    for key in mae_keys:
+        print(f"{key}: {final[f'mean_{key}']:.5f} +/- {final[f'std_{key}']:.5f}")
 
 
 def main():
-    run("z_residual_physics_shrinkage", train_cached_mamba_fold_z_residual_shrinkage)
-    run("z_residual_physics_simplified", train_cached_mamba_fold_z_residual, SIMPLIFIED_CFG_OVERRIDES)
-    run("z_residual_physics_attnpool", train_cached_mamba_fold_z_residual_attnpool, ATTNPOOL_CFG_OVERRIDES)
-    run("z_residual_physics_pretrained", train_cached_mamba_fold_z_residual_pretrained, PRETRAINED_CFG_OVERRIDES)
+    z_mae_keys = ["best_val_mae_z_phys"]
+    xy_mae_keys = ["best_val_mae_x_phys", "best_val_mae_y_phys"]
+
+    run("z", "z_residual_physics_shrinkage", train_cached_mamba_fold_z_residual_shrinkage, z_mae_keys)
+    run("z", "z_residual_physics_simplified", train_cached_mamba_fold_z_residual, z_mae_keys, SIMPLIFIED_CFG_OVERRIDES)
+    run("z", "z_residual_physics_attnpool", train_cached_mamba_fold_z_residual_attnpool, z_mae_keys, ATTNPOOL_CFG_OVERRIDES)
+    run("z", "z_residual_physics_pretrained", train_cached_mamba_fold_z_residual_pretrained, z_mae_keys, PRETRAINED_CFG_OVERRIDES)
+
+    run("xy", "xy_residual_physics_shrinkage", train_cached_mamba_fold_xy_residual_shrinkage, xy_mae_keys)
+    run("xy", "xy_residual_physics_simplified", train_cached_mamba_fold_xy_residual, xy_mae_keys, SIMPLIFIED_CFG_OVERRIDES)
+    run("xy", "xy_residual_physics_attnpool", train_cached_mamba_fold_xy_residual_attnpool, xy_mae_keys, ATTNPOOL_CFG_OVERRIDES)
+    run("xy", "xy_residual_physics_pretrained", train_cached_mamba_fold_xy_residual_pretrained, xy_mae_keys, PRETRAINED_CFG_OVERRIDES)
+
     print("\nALL_RESIDUAL_PHYSICS_ABLATIONS_DONE")
 
 
