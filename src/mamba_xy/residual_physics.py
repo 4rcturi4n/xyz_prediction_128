@@ -1621,3 +1621,526 @@ def train_cached_mamba_fold_xy_residual_pretrained(fold: int, cfg: dict, device:
     with open(os.path.join(out_dir, "summary.json"), "w", encoding="utf-8") as f:
         json.dump(fold_summary, f, indent=2)
     return history_df, fold_summary
+
+
+# --------------------------------------------------
+# xy residual-physics, INDEPENDENT per-axis I_th (no joint fit with z).
+# Mirrors the pre-joint-I_th z scheme that outperformed fused/baseline
+# MLP: x and y each get their own fit_lateral call, no cross-loading of
+# the other axis at all. Base + all 4 ablations.
+# --------------------------------------------------
+
+def train_cached_mamba_fold_xy_residual_indepith(fold: int, cfg: dict, device: torch.device):
+    fold_dir = os.path.join(cfg["embeddings_dir"], f"fold_{fold}")
+    train_path = os.path.join(fold_dir, "train_embeddings.pt")
+    val_path = os.path.join(fold_dir, "val_embeddings.pt")
+
+    out_dir = os.path.join(cfg["out_dir"], f"fold_{fold}")
+    os.makedirs(out_dir, exist_ok=True)
+
+    train_payload_raw = torch.load(train_path, map_location="cpu", weights_only=False)
+    power_train = train_payload_raw["power_mW"].numpy()
+    w0_x, ith_x = fit_lateral(power_train, train_payload_raw["targets_x_phys"].numpy())
+    w0_y, ith_y = fit_lateral(power_train, train_payload_raw["targets_y_phys"].numpy())
+    print(f"Fold {fold} | independent physics fit (TRAIN only): w0_x={w0_x:.4f} I_th_x={ith_x:.4f}  "
+          f"w0_y={w0_y:.4f} I_th_y={ith_y:.4f}")
+    w0_params = (w0_x, ith_x, w0_y, ith_y)
+
+    train_dataset = CachedMambaResidualDatasetXY(train_path, w0_params)
+    val_dataset = CachedMambaResidualDatasetXY(
+        val_path, w0_params, residual_mean=train_dataset.residual_mean, residual_std=train_dataset.residual_std,
+    )
+    print(f"Fold {fold} | train rows: {len(train_dataset)} | val videos: {len(val_dataset)}")
+
+    train_loader = DataLoader(train_dataset, batch_size=cfg["batch_size"], shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_dataset, batch_size=cfg["batch_size"], shuffle=False, num_workers=0)
+    physics_pred_x_lookup = {v: float(p) for v, p in zip(val_dataset.video_ids, val_dataset.physics_pred_x)}
+    physics_pred_y_lookup = {v: float(p) for v, p in zip(val_dataset.video_ids, val_dataset.physics_pred_y)}
+
+    embed_dim = train_dataset.embeddings.shape[-1]
+    model = MambaSequenceRegressorXY(
+        embed_dim=embed_dim, n_mamba_layers=cfg["n_mamba_layers"], d_state=cfg["d_state"],
+        d_conv=cfg["d_conv"], expand=cfg["expand"], hidden_dim=cfg["hidden_dim"], dropout=cfg["dropout"],
+    ).to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg["lr"], weight_decay=cfg["weight_decay"])
+    loss_fn_mean = nn.SmoothL1Loss()
+    residual_mean, residual_std = train_dataset.residual_mean, train_dataset.residual_std
+
+    best_val_mae, best_epoch, epochs_no_imp, history = float("inf"), None, 0, []
+    for epoch in range(1, cfg["epochs"] + 1):
+        model.train()
+        train_losses = []
+        for emb, targets_norm, targets_phys, loss_weight, power_norm, video_ids in train_loader:
+            emb, targets_norm = emb.to(device), targets_norm.to(device)
+            optimizer.zero_grad()
+            preds = model(emb)
+            loss = compute_loss_xy(preds, targets_norm, loss_fn_mean)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            train_losses.append(loss.item())
+        train_loss = float(np.mean(train_losses))
+
+        val_metrics, _, mae_per_t_df, ept_df = evaluate_xy_residual(
+            model=model, loader=val_loader, device=device,
+            residual_mean=residual_mean, residual_std=residual_std,
+            physics_pred_x_lookup=physics_pred_x_lookup, physics_pred_y_lookup=physics_pred_y_lookup,
+            ept_threshold_um=cfg["ept_threshold_um"],
+        )
+        current_mae = (val_metrics["final_mae_x_phys"] + val_metrics["final_mae_y_phys"]) / 2.0
+        improved = current_mae < (best_val_mae - cfg["min_delta"])
+        if improved:
+            best_val_mae, best_epoch, epochs_no_imp = current_mae, epoch, 0
+            torch.save({"fold": fold, "epoch": epoch, "model_state_dict": model.state_dict(), "cfg": cfg,
+                        "residual_mean": residual_mean, "residual_std": residual_std,
+                        "best_val_mae": best_val_mae}, os.path.join(out_dir, "model_best.pth"))
+            mae_per_t_df.to_csv(os.path.join(out_dir, "mae_per_timestep.csv"), index=False)
+        else:
+            epochs_no_imp += 1
+        history.append({"fold": fold, "epoch": epoch, "train_loss": train_loss, **val_metrics,
+                         "improved": improved, "epochs_without_improvement": epochs_no_imp})
+        print(f"Fold {fold} | Epoch {epoch:03d} | train_loss={train_loss:.5f} | "
+              f"mae_x={val_metrics['final_mae_x_phys']:.5f} mae_y={val_metrics['final_mae_y_phys']:.5f} | "
+              f"no_improve={epochs_no_imp}/{cfg['early_stopping_patience']}")
+        if epochs_no_imp >= cfg["early_stopping_patience"]:
+            print(f"Early stopping fold {fold} at epoch {epoch}. Best epoch: {best_epoch}")
+            break
+
+    history_df = pd.DataFrame(history)
+    history_df.to_csv(os.path.join(out_dir, "history.csv"), index=False)
+    plot_learning_curve(history_df, os.path.join(out_dir, "learning_curve.png"), fold,
+                         val_cols=[("final_mae_x_phys", "val_mae_x"), ("final_mae_y_phys", "val_mae_y")])
+
+    ckpt = torch.load(os.path.join(out_dir, "model_best.pth"), map_location=device, weights_only=False)
+    model.load_state_dict(ckpt["model_state_dict"])
+
+    best_val_metrics, per_video_df, mae_per_t_df, ept_df = evaluate_xy_residual(
+        model=model, loader=val_loader, device=device,
+        residual_mean=residual_mean, residual_std=residual_std,
+        physics_pred_x_lookup=physics_pred_x_lookup, physics_pred_y_lookup=physics_pred_y_lookup,
+        ept_threshold_um=cfg["ept_threshold_um"],
+    )
+    per_video_df.to_csv(os.path.join(out_dir, "val_predictions_per_timestep.csv"), index=False)
+    mae_per_t_df.to_csv(os.path.join(out_dir, "mae_per_timestep.csv"), index=False)
+    plot_mae_curve_xy(mae_per_t_df, os.path.join(out_dir, "mae_curve.png"), fold)
+
+    x_bw_lookup, y_bw_lookup = load_bandwidth_lookup_xy()
+    video_power_lookup = load_video_power_lookup_xy(fold, split_dir=cfg.get("split_dir"))
+    plot_video_trajectories_xy(
+        per_video_df, out_dir=os.path.join(out_dir, "monitoring_plots"),
+        ept_threshold_um=cfg["ept_threshold_um"], max_videos=cfg.get("max_trajectory_plots", 10),
+        video_power_lookup=video_power_lookup, x_bandwidth_lookup=x_bw_lookup, y_bandwidth_lookup=y_bw_lookup,
+    )
+
+    fold_summary = {
+        "fold": fold, "best_epoch": best_epoch,
+        "w0_x": float(w0_x), "i_th_x_mW": float(ith_x), "w0_y": float(w0_y), "i_th_y_mW": float(ith_y),
+        "best_val_mae_x_phys": float(best_val_metrics["final_mae_x_phys"]),
+        "best_val_mae_y_phys": float(best_val_metrics["final_mae_y_phys"]),
+        "best_val_mae_std_x_phys": float(best_val_metrics["final_mae_std_x_phys"]),
+        "best_val_mae_std_y_phys": float(best_val_metrics["final_mae_std_y_phys"]),
+        "best_val_rmse_x_phys": float(best_val_metrics["final_rmse_x_phys"]),
+        "best_val_rmse_y_phys": float(best_val_metrics["final_rmse_y_phys"]),
+        "best_val_bias_x_phys": float(best_val_metrics["final_bias_x_phys"]),
+        "best_val_bias_y_phys": float(best_val_metrics["final_bias_y_phys"]),
+        "num_train_rows": len(train_dataset), "num_val": len(val_dataset),
+    }
+    with open(os.path.join(out_dir, "summary.json"), "w", encoding="utf-8") as f:
+        json.dump(fold_summary, f, indent=2)
+    return history_df, fold_summary
+
+
+def train_cached_mamba_fold_xy_residual_indepith_shrinkage(fold: int, cfg: dict, device: torch.device):
+    fold_dir = os.path.join(cfg["embeddings_dir"], f"fold_{fold}")
+    train_path = os.path.join(fold_dir, "train_embeddings.pt")
+    val_path = os.path.join(fold_dir, "val_embeddings.pt")
+
+    out_dir = os.path.join(cfg["out_dir"], f"fold_{fold}")
+    os.makedirs(out_dir, exist_ok=True)
+
+    train_payload_raw = torch.load(train_path, map_location="cpu", weights_only=False)
+    power_train = train_payload_raw["power_mW"].numpy()
+    w0_x, ith_x = fit_lateral(power_train, train_payload_raw["targets_x_phys"].numpy())
+    w0_y, ith_y = fit_lateral(power_train, train_payload_raw["targets_y_phys"].numpy())
+    print(f"Fold {fold} | independent physics fit (TRAIN only): w0_x={w0_x:.4f} I_th_x={ith_x:.4f}  "
+          f"w0_y={w0_y:.4f} I_th_y={ith_y:.4f}")
+    w0_params = (w0_x, ith_x, w0_y, ith_y)
+
+    train_dataset = CachedMambaResidualDatasetXY(train_path, w0_params)
+    val_dataset = CachedMambaResidualDatasetXY(
+        val_path, w0_params, residual_mean=train_dataset.residual_mean, residual_std=train_dataset.residual_std,
+    )
+    print(f"Fold {fold} | train rows: {len(train_dataset)} | val videos: {len(val_dataset)}")
+
+    train_loader = DataLoader(train_dataset, batch_size=cfg["batch_size"], shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_dataset, batch_size=cfg["batch_size"], shuffle=False, num_workers=0)
+    physics_pred_x_lookup = {v: float(p) for v, p in zip(val_dataset.video_ids, val_dataset.physics_pred_x)}
+    physics_pred_y_lookup = {v: float(p) for v, p in zip(val_dataset.video_ids, val_dataset.physics_pred_y)}
+
+    embed_dim = train_dataset.embeddings.shape[-1]
+    model = MambaSequenceRegressorXY(
+        embed_dim=embed_dim, n_mamba_layers=cfg["n_mamba_layers"], d_state=cfg["d_state"],
+        d_conv=cfg["d_conv"], expand=cfg["expand"], hidden_dim=cfg["hidden_dim"], dropout=cfg["dropout"],
+    ).to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg["lr"], weight_decay=cfg["weight_decay"])
+    loss_fn_mean = nn.SmoothL1Loss()
+    residual_mean, residual_std = train_dataset.residual_mean, train_dataset.residual_std
+
+    best_val_mae, best_epoch, epochs_no_imp, history = float("inf"), None, 0, []
+    for epoch in range(1, cfg["epochs"] + 1):
+        model.train()
+        train_losses = []
+        for emb, targets_norm, targets_phys, loss_weight, power_norm, video_ids in train_loader:
+            emb, targets_norm = emb.to(device), targets_norm.to(device)
+            optimizer.zero_grad()
+            preds = model(emb)
+            loss = compute_loss_xy(preds, targets_norm, loss_fn_mean)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            train_losses.append(loss.item())
+        train_loss = float(np.mean(train_losses))
+
+        val_metrics, _, mae_per_t_df, ept_df = evaluate_xy_residual(
+            model=model, loader=val_loader, device=device,
+            residual_mean=residual_mean, residual_std=residual_std,
+            physics_pred_x_lookup=physics_pred_x_lookup, physics_pred_y_lookup=physics_pred_y_lookup,
+            ept_threshold_um=cfg["ept_threshold_um"],
+        )
+        current_mae = (val_metrics["final_mae_x_phys"] + val_metrics["final_mae_y_phys"]) / 2.0
+        improved = current_mae < (best_val_mae - cfg["min_delta"])
+        if improved:
+            best_val_mae, best_epoch, epochs_no_imp = current_mae, epoch, 0
+            torch.save({"fold": fold, "epoch": epoch, "model_state_dict": model.state_dict(), "cfg": cfg,
+                        "residual_mean": residual_mean, "residual_std": residual_std,
+                        "best_val_mae": best_val_mae}, os.path.join(out_dir, "model_best.pth"))
+        else:
+            epochs_no_imp += 1
+        history.append({"fold": fold, "epoch": epoch, "train_loss": train_loss, **val_metrics,
+                         "improved": improved, "epochs_without_improvement": epochs_no_imp})
+        print(f"Fold {fold} | Epoch {epoch:03d} | train_loss={train_loss:.5f} | "
+              f"mae_x={val_metrics['final_mae_x_phys']:.5f} mae_y={val_metrics['final_mae_y_phys']:.5f} | "
+              f"no_improve={epochs_no_imp}/{cfg['early_stopping_patience']}")
+        if epochs_no_imp >= cfg["early_stopping_patience"]:
+            print(f"Early stopping fold {fold} at epoch {epoch}. Best epoch: {best_epoch}")
+            break
+
+    history_df = pd.DataFrame(history)
+    history_df.to_csv(os.path.join(out_dir, "history.csv"), index=False)
+    plot_learning_curve(history_df, os.path.join(out_dir, "learning_curve.png"), fold,
+                         val_cols=[("final_mae_x_phys", "val_mae_x"), ("final_mae_y_phys", "val_mae_y")])
+
+    ckpt = torch.load(os.path.join(out_dir, "model_best.pth"), map_location=device, weights_only=False)
+    model.load_state_dict(ckpt["model_state_dict"])
+
+    rng = np.random.default_rng(cfg["seed"] + fold)
+    n = len(train_dataset)
+    holdout_idx = rng.choice(n, size=max(1, int(n * 0.2)), replace=False)
+    holdout_subset = torch.utils.data.Subset(train_dataset, holdout_idx)
+    holdout_loader = DataLoader(holdout_subset, batch_size=cfg["batch_size"], shuffle=False, num_workers=0)
+    holdout_physics_x_lookup = {train_dataset.video_ids[i]: float(train_dataset.physics_pred_x[i]) for i in holdout_idx}
+    holdout_physics_y_lookup = {train_dataset.video_ids[i]: float(train_dataset.physics_pred_y[i]) for i in holdout_idx}
+    model.eval()
+    pred_res_x_list, true_res_x_list, pred_res_y_list, true_res_y_list = [], [], [], []
+    with torch.no_grad():
+        for emb, targets_norm, targets_phys, loss_weight, power_norm, video_ids in holdout_loader:
+            emb = emb.to(device)
+            preds = model(emb)[:, -1, :].cpu().numpy()
+            pred_res_x_phys = preds[:, 0] * residual_std["x"]
+            pred_res_y_phys = preds[:, 1] * residual_std["y"]
+            for j, vid in enumerate(video_ids):
+                true_x = float(targets_phys[j, 0])
+                true_y = float(targets_phys[j, 1])
+                true_res_x_list.append(true_x - holdout_physics_x_lookup[vid] - residual_mean["x"])
+                true_res_y_list.append(true_y - holdout_physics_y_lookup[vid] - residual_mean["y"])
+                pred_res_x_list.append(pred_res_x_phys[j])
+                pred_res_y_list.append(pred_res_y_phys[j])
+
+    pred_res_x_arr, true_res_x_arr = np.array(pred_res_x_list), np.array(true_res_x_list)
+    pred_res_y_arr, true_res_y_arr = np.array(pred_res_y_list), np.array(true_res_y_list)
+    denom_x = float(np.sum(pred_res_x_arr ** 2))
+    denom_y = float(np.sum(pred_res_y_arr ** 2))
+    alpha_x = float(np.sum(pred_res_x_arr * true_res_x_arr) / denom_x) if denom_x > 1e-8 else 1.0
+    alpha_y = float(np.sum(pred_res_y_arr * true_res_y_arr) / denom_y) if denom_y > 1e-8 else 1.0
+    alpha_x, alpha_y = float(np.clip(alpha_x, 0.0, 2.0)), float(np.clip(alpha_y, 0.0, 2.0))
+    print(f"Fold {fold} | fitted shrinkage (TRAIN holdout only): alpha_x={alpha_x:.4f} alpha_y={alpha_y:.4f}")
+
+    best_val_metrics, per_video_df, mae_per_t_df, ept_df = evaluate_xy_residual(
+        model=model, loader=val_loader, device=device,
+        residual_mean=residual_mean, residual_std=residual_std,
+        physics_pred_x_lookup=physics_pred_x_lookup, physics_pred_y_lookup=physics_pred_y_lookup,
+        ept_threshold_um=cfg["ept_threshold_um"], alpha_x=alpha_x, alpha_y=alpha_y,
+    )
+    per_video_df.to_csv(os.path.join(out_dir, "val_predictions_per_timestep.csv"), index=False)
+    mae_per_t_df.to_csv(os.path.join(out_dir, "mae_per_timestep.csv"), index=False)
+    plot_mae_curve_xy(mae_per_t_df, os.path.join(out_dir, "mae_curve.png"), fold)
+
+    x_bw_lookup, y_bw_lookup = load_bandwidth_lookup_xy()
+    video_power_lookup = load_video_power_lookup_xy(fold, split_dir=cfg.get("split_dir"))
+    plot_video_trajectories_xy(
+        per_video_df, out_dir=os.path.join(out_dir, "monitoring_plots"),
+        ept_threshold_um=cfg["ept_threshold_um"], max_videos=cfg.get("max_trajectory_plots", 10),
+        video_power_lookup=video_power_lookup, x_bandwidth_lookup=x_bw_lookup, y_bandwidth_lookup=y_bw_lookup,
+    )
+
+    fold_summary = {
+        "fold": fold, "best_epoch": best_epoch,
+        "w0_x": float(w0_x), "i_th_x_mW": float(ith_x), "w0_y": float(w0_y), "i_th_y_mW": float(ith_y),
+        "alpha_x": alpha_x, "alpha_y": alpha_y,
+        "best_val_mae_x_phys": float(best_val_metrics["final_mae_x_phys"]),
+        "best_val_mae_y_phys": float(best_val_metrics["final_mae_y_phys"]),
+        "best_val_mae_std_x_phys": float(best_val_metrics["final_mae_std_x_phys"]),
+        "best_val_mae_std_y_phys": float(best_val_metrics["final_mae_std_y_phys"]),
+        "best_val_rmse_x_phys": float(best_val_metrics["final_rmse_x_phys"]),
+        "best_val_rmse_y_phys": float(best_val_metrics["final_rmse_y_phys"]),
+        "best_val_bias_x_phys": float(best_val_metrics["final_bias_x_phys"]),
+        "best_val_bias_y_phys": float(best_val_metrics["final_bias_y_phys"]),
+        "num_train_rows": len(train_dataset), "num_val": len(val_dataset),
+    }
+    with open(os.path.join(out_dir, "summary.json"), "w", encoding="utf-8") as f:
+        json.dump(fold_summary, f, indent=2)
+    return history_df, fold_summary
+
+
+def train_cached_mamba_fold_xy_residual_indepith_attnpool(fold: int, cfg: dict, device: torch.device):
+    fold_dir = os.path.join(cfg["embeddings_dir"], f"fold_{fold}")
+    train_path = os.path.join(fold_dir, "train_embeddings.pt")
+    val_path = os.path.join(fold_dir, "val_embeddings.pt")
+
+    out_dir = os.path.join(cfg["out_dir"], f"fold_{fold}")
+    os.makedirs(out_dir, exist_ok=True)
+
+    train_payload_raw = torch.load(train_path, map_location="cpu", weights_only=False)
+    power_train = train_payload_raw["power_mW"].numpy()
+    w0_x, ith_x = fit_lateral(power_train, train_payload_raw["targets_x_phys"].numpy())
+    w0_y, ith_y = fit_lateral(power_train, train_payload_raw["targets_y_phys"].numpy())
+    print(f"Fold {fold} | independent physics fit (TRAIN only): w0_x={w0_x:.4f} I_th_x={ith_x:.4f}  "
+          f"w0_y={w0_y:.4f} I_th_y={ith_y:.4f}")
+    w0_params = (w0_x, ith_x, w0_y, ith_y)
+
+    train_dataset = CachedMambaResidualDatasetXY(train_path, w0_params)
+    val_dataset = CachedMambaResidualDatasetXY(
+        val_path, w0_params, residual_mean=train_dataset.residual_mean, residual_std=train_dataset.residual_std,
+    )
+    print(f"Fold {fold} | train rows: {len(train_dataset)} | val videos: {len(val_dataset)}")
+
+    train_loader = DataLoader(train_dataset, batch_size=cfg["batch_size"], shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_dataset, batch_size=cfg["batch_size"], shuffle=False, num_workers=0)
+    physics_pred_x_lookup = {v: float(p) for v, p in zip(val_dataset.video_ids, val_dataset.physics_pred_x)}
+    physics_pred_y_lookup = {v: float(p) for v, p in zip(val_dataset.video_ids, val_dataset.physics_pred_y)}
+
+    embed_dim = train_dataset.embeddings.shape[-1]
+    model = CausalAttnPoolRegressorXY(
+        embed_dim=embed_dim, n_layers=cfg["attn_n_layers"], n_heads=cfg["attn_n_heads"],
+        hidden_dim=cfg["hidden_dim"], dropout=cfg["dropout"],
+    ).to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg["lr"], weight_decay=cfg["weight_decay"])
+    loss_fn_mean = nn.SmoothL1Loss()
+    residual_mean, residual_std = train_dataset.residual_mean, train_dataset.residual_std
+
+    best_val_mae, best_epoch, epochs_no_imp, history = float("inf"), None, 0, []
+    for epoch in range(1, cfg["epochs"] + 1):
+        model.train()
+        train_losses = []
+        for emb, targets_norm, targets_phys, loss_weight, power_norm, video_ids in train_loader:
+            emb, targets_norm = emb.to(device), targets_norm.to(device)
+            optimizer.zero_grad()
+            preds = model(emb)
+            loss = compute_loss_xy(preds, targets_norm, loss_fn_mean)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            train_losses.append(loss.item())
+        train_loss = float(np.mean(train_losses))
+
+        val_metrics, _, mae_per_t_df, ept_df = evaluate_xy_residual(
+            model=model, loader=val_loader, device=device,
+            residual_mean=residual_mean, residual_std=residual_std,
+            physics_pred_x_lookup=physics_pred_x_lookup, physics_pred_y_lookup=physics_pred_y_lookup,
+            ept_threshold_um=cfg["ept_threshold_um"],
+        )
+        current_mae = (val_metrics["final_mae_x_phys"] + val_metrics["final_mae_y_phys"]) / 2.0
+        improved = current_mae < (best_val_mae - cfg["min_delta"])
+        if improved:
+            best_val_mae, best_epoch, epochs_no_imp = current_mae, epoch, 0
+            torch.save({"fold": fold, "epoch": epoch, "model_state_dict": model.state_dict(), "cfg": cfg,
+                        "residual_mean": residual_mean, "residual_std": residual_std,
+                        "best_val_mae": best_val_mae}, os.path.join(out_dir, "model_best.pth"))
+        else:
+            epochs_no_imp += 1
+        history.append({"fold": fold, "epoch": epoch, "train_loss": train_loss, **val_metrics,
+                         "improved": improved, "epochs_without_improvement": epochs_no_imp})
+        print(f"Fold {fold} | Epoch {epoch:03d} | train_loss={train_loss:.5f} | "
+              f"mae_x={val_metrics['final_mae_x_phys']:.5f} mae_y={val_metrics['final_mae_y_phys']:.5f} | "
+              f"no_improve={epochs_no_imp}/{cfg['early_stopping_patience']}")
+        if epochs_no_imp >= cfg["early_stopping_patience"]:
+            print(f"Early stopping fold {fold} at epoch {epoch}. Best epoch: {best_epoch}")
+            break
+
+    history_df = pd.DataFrame(history)
+    history_df.to_csv(os.path.join(out_dir, "history.csv"), index=False)
+    plot_learning_curve(history_df, os.path.join(out_dir, "learning_curve.png"), fold,
+                         val_cols=[("final_mae_x_phys", "val_mae_x"), ("final_mae_y_phys", "val_mae_y")])
+
+    ckpt = torch.load(os.path.join(out_dir, "model_best.pth"), map_location=device, weights_only=False)
+    model.load_state_dict(ckpt["model_state_dict"])
+
+    best_val_metrics, per_video_df, mae_per_t_df, ept_df = evaluate_xy_residual(
+        model=model, loader=val_loader, device=device,
+        residual_mean=residual_mean, residual_std=residual_std,
+        physics_pred_x_lookup=physics_pred_x_lookup, physics_pred_y_lookup=physics_pred_y_lookup,
+        ept_threshold_um=cfg["ept_threshold_um"],
+    )
+    per_video_df.to_csv(os.path.join(out_dir, "val_predictions_per_timestep.csv"), index=False)
+    mae_per_t_df.to_csv(os.path.join(out_dir, "mae_per_timestep.csv"), index=False)
+    plot_mae_curve_xy(mae_per_t_df, os.path.join(out_dir, "mae_curve.png"), fold)
+
+    x_bw_lookup, y_bw_lookup = load_bandwidth_lookup_xy()
+    video_power_lookup = load_video_power_lookup_xy(fold, split_dir=cfg.get("split_dir"))
+    plot_video_trajectories_xy(
+        per_video_df, out_dir=os.path.join(out_dir, "monitoring_plots"),
+        ept_threshold_um=cfg["ept_threshold_um"], max_videos=cfg.get("max_trajectory_plots", 10),
+        video_power_lookup=video_power_lookup, x_bandwidth_lookup=x_bw_lookup, y_bandwidth_lookup=y_bw_lookup,
+    )
+
+    fold_summary = {
+        "fold": fold, "best_epoch": best_epoch,
+        "w0_x": float(w0_x), "i_th_x_mW": float(ith_x), "w0_y": float(w0_y), "i_th_y_mW": float(ith_y),
+        "best_val_mae_x_phys": float(best_val_metrics["final_mae_x_phys"]),
+        "best_val_mae_y_phys": float(best_val_metrics["final_mae_y_phys"]),
+        "best_val_mae_std_x_phys": float(best_val_metrics["final_mae_std_x_phys"]),
+        "best_val_mae_std_y_phys": float(best_val_metrics["final_mae_std_y_phys"]),
+        "best_val_rmse_x_phys": float(best_val_metrics["final_rmse_x_phys"]),
+        "best_val_rmse_y_phys": float(best_val_metrics["final_rmse_y_phys"]),
+        "best_val_bias_x_phys": float(best_val_metrics["final_bias_x_phys"]),
+        "best_val_bias_y_phys": float(best_val_metrics["final_bias_y_phys"]),
+        "num_train_rows": len(train_dataset), "num_val": len(val_dataset),
+    }
+    with open(os.path.join(out_dir, "summary.json"), "w", encoding="utf-8") as f:
+        json.dump(fold_summary, f, indent=2)
+    return history_df, fold_summary
+
+
+def train_cached_mamba_fold_xy_residual_indepith_pretrained(fold: int, cfg: dict, device: torch.device):
+    fold_dir = os.path.join(cfg["embeddings_dir"], f"fold_{fold}")
+    train_path = os.path.join(fold_dir, "train_embeddings.pt")
+    val_path = os.path.join(fold_dir, "val_embeddings.pt")
+
+    out_dir = os.path.join(cfg["out_dir"], f"fold_{fold}")
+    os.makedirs(out_dir, exist_ok=True)
+
+    train_payload_raw = torch.load(train_path, map_location="cpu", weights_only=False)
+    power_train = train_payload_raw["power_mW"].numpy()
+    w0_x, ith_x = fit_lateral(power_train, train_payload_raw["targets_x_phys"].numpy())
+    w0_y, ith_y = fit_lateral(power_train, train_payload_raw["targets_y_phys"].numpy())
+    print(f"Fold {fold} | independent physics fit (TRAIN only): w0_x={w0_x:.4f} I_th_x={ith_x:.4f}  "
+          f"w0_y={w0_y:.4f} I_th_y={ith_y:.4f}")
+    w0_params = (w0_x, ith_x, w0_y, ith_y)
+
+    train_dataset = CachedMambaResidualDatasetXY(train_path, w0_params)
+    val_dataset = CachedMambaResidualDatasetXY(
+        val_path, w0_params, residual_mean=train_dataset.residual_mean, residual_std=train_dataset.residual_std,
+    )
+    print(f"Fold {fold} | train rows: {len(train_dataset)} | val videos: {len(val_dataset)}")
+
+    train_loader = DataLoader(train_dataset, batch_size=cfg["batch_size"], shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_dataset, batch_size=cfg["batch_size"], shuffle=False, num_workers=0)
+    physics_pred_x_lookup = {v: float(p) for v, p in zip(val_dataset.video_ids, val_dataset.physics_pred_x)}
+    physics_pred_y_lookup = {v: float(p) for v, p in zip(val_dataset.video_ids, val_dataset.physics_pred_y)}
+
+    embed_dim = train_dataset.embeddings.shape[-1]
+    print(f"Fold {fold} | self-supervised pretraining trunk on {len(train_dataset)} train embedding sequences (no labels)")
+    pretrained_trunk_state = pretrain_mamba_trunk(train_dataset.embeddings, cfg, device)
+
+    model = MambaSequenceRegressorXY(
+        embed_dim=embed_dim, n_mamba_layers=cfg["n_mamba_layers"], d_state=cfg["d_state"],
+        d_conv=cfg["d_conv"], expand=cfg["expand"], hidden_dim=cfg["hidden_dim"], dropout=cfg["dropout"],
+    ).to(device)
+    model.mamba_blocks.load_state_dict(pretrained_trunk_state)
+    print(f"Fold {fold} | loaded pretrained trunk weights into MambaSequenceRegressorXY")
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg["lr"], weight_decay=cfg["weight_decay"])
+    loss_fn_mean = nn.SmoothL1Loss()
+    residual_mean, residual_std = train_dataset.residual_mean, train_dataset.residual_std
+
+    best_val_mae, best_epoch, epochs_no_imp, history = float("inf"), None, 0, []
+    for epoch in range(1, cfg["epochs"] + 1):
+        model.train()
+        train_losses = []
+        for emb, targets_norm, targets_phys, loss_weight, power_norm, video_ids in train_loader:
+            emb, targets_norm = emb.to(device), targets_norm.to(device)
+            optimizer.zero_grad()
+            preds = model(emb)
+            loss = compute_loss_xy(preds, targets_norm, loss_fn_mean)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            train_losses.append(loss.item())
+        train_loss = float(np.mean(train_losses))
+
+        val_metrics, _, mae_per_t_df, ept_df = evaluate_xy_residual(
+            model=model, loader=val_loader, device=device,
+            residual_mean=residual_mean, residual_std=residual_std,
+            physics_pred_x_lookup=physics_pred_x_lookup, physics_pred_y_lookup=physics_pred_y_lookup,
+            ept_threshold_um=cfg["ept_threshold_um"],
+        )
+        current_mae = (val_metrics["final_mae_x_phys"] + val_metrics["final_mae_y_phys"]) / 2.0
+        improved = current_mae < (best_val_mae - cfg["min_delta"])
+        if improved:
+            best_val_mae, best_epoch, epochs_no_imp = current_mae, epoch, 0
+            torch.save({"fold": fold, "epoch": epoch, "model_state_dict": model.state_dict(), "cfg": cfg,
+                        "residual_mean": residual_mean, "residual_std": residual_std,
+                        "best_val_mae": best_val_mae}, os.path.join(out_dir, "model_best.pth"))
+        else:
+            epochs_no_imp += 1
+        history.append({"fold": fold, "epoch": epoch, "train_loss": train_loss, **val_metrics,
+                         "improved": improved, "epochs_without_improvement": epochs_no_imp})
+        print(f"Fold {fold} | Epoch {epoch:03d} | train_loss={train_loss:.5f} | "
+              f"mae_x={val_metrics['final_mae_x_phys']:.5f} mae_y={val_metrics['final_mae_y_phys']:.5f} | "
+              f"no_improve={epochs_no_imp}/{cfg['early_stopping_patience']}")
+        if epochs_no_imp >= cfg["early_stopping_patience"]:
+            print(f"Early stopping fold {fold} at epoch {epoch}. Best epoch: {best_epoch}")
+            break
+
+    history_df = pd.DataFrame(history)
+    history_df.to_csv(os.path.join(out_dir, "history.csv"), index=False)
+    plot_learning_curve(history_df, os.path.join(out_dir, "learning_curve.png"), fold,
+                         val_cols=[("final_mae_x_phys", "val_mae_x"), ("final_mae_y_phys", "val_mae_y")])
+
+    ckpt = torch.load(os.path.join(out_dir, "model_best.pth"), map_location=device, weights_only=False)
+    model.load_state_dict(ckpt["model_state_dict"])
+
+    best_val_metrics, per_video_df, mae_per_t_df, ept_df = evaluate_xy_residual(
+        model=model, loader=val_loader, device=device,
+        residual_mean=residual_mean, residual_std=residual_std,
+        physics_pred_x_lookup=physics_pred_x_lookup, physics_pred_y_lookup=physics_pred_y_lookup,
+        ept_threshold_um=cfg["ept_threshold_um"],
+    )
+    per_video_df.to_csv(os.path.join(out_dir, "val_predictions_per_timestep.csv"), index=False)
+    mae_per_t_df.to_csv(os.path.join(out_dir, "mae_per_timestep.csv"), index=False)
+    plot_mae_curve_xy(mae_per_t_df, os.path.join(out_dir, "mae_curve.png"), fold)
+
+    x_bw_lookup, y_bw_lookup = load_bandwidth_lookup_xy()
+    video_power_lookup = load_video_power_lookup_xy(fold, split_dir=cfg.get("split_dir"))
+    plot_video_trajectories_xy(
+        per_video_df, out_dir=os.path.join(out_dir, "monitoring_plots"),
+        ept_threshold_um=cfg["ept_threshold_um"], max_videos=cfg.get("max_trajectory_plots", 10),
+        video_power_lookup=video_power_lookup, x_bandwidth_lookup=x_bw_lookup, y_bandwidth_lookup=y_bw_lookup,
+    )
+
+    fold_summary = {
+        "fold": fold, "best_epoch": best_epoch,
+        "w0_x": float(w0_x), "i_th_x_mW": float(ith_x), "w0_y": float(w0_y), "i_th_y_mW": float(ith_y),
+        "best_val_mae_x_phys": float(best_val_metrics["final_mae_x_phys"]),
+        "best_val_mae_y_phys": float(best_val_metrics["final_mae_y_phys"]),
+        "best_val_mae_std_x_phys": float(best_val_metrics["final_mae_std_x_phys"]),
+        "best_val_mae_std_y_phys": float(best_val_metrics["final_mae_std_y_phys"]),
+        "best_val_rmse_x_phys": float(best_val_metrics["final_rmse_x_phys"]),
+        "best_val_rmse_y_phys": float(best_val_metrics["final_rmse_y_phys"]),
+        "best_val_bias_x_phys": float(best_val_metrics["final_bias_x_phys"]),
+        "best_val_bias_y_phys": float(best_val_metrics["final_bias_y_phys"]),
+        "num_train_rows": len(train_dataset), "num_val": len(val_dataset),
+    }
+    with open(os.path.join(out_dir, "summary.json"), "w", encoding="utf-8") as f:
+        json.dump(fold_summary, f, indent=2)
+    return history_df, fold_summary
