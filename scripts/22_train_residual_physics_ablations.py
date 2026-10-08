@@ -124,10 +124,12 @@ def main():
     z_mae_keys = ["best_val_mae_z_phys"]
     xy_mae_keys = ["best_val_mae_x_phys", "best_val_mae_y_phys"]
 
-    run("z", "z_residual_physics_shrinkage", train_cached_mamba_fold_z_residual_shrinkage, z_mae_keys)
-    run("z", "z_residual_physics_simplified", train_cached_mamba_fold_z_residual, z_mae_keys, SIMPLIFIED_CFG_OVERRIDES)
-    run("z", "z_residual_physics_attnpool", train_cached_mamba_fold_z_residual_attnpool, z_mae_keys, ATTNPOOL_CFG_OVERRIDES)
-    run("z", "z_residual_physics_pretrained", train_cached_mamba_fold_z_residual_pretrained, z_mae_keys, PRETRAINED_CFG_OVERRIDES)
+    # _jointith suffix: these use the joint shared-I_th physics fit, distinct
+    # from any earlier z_residual_physics_* run made before that fix landed.
+    run("z", "z_residual_physics_shrinkage_jointith", train_cached_mamba_fold_z_residual_shrinkage, z_mae_keys)
+    run("z", "z_residual_physics_simplified_jointith", train_cached_mamba_fold_z_residual, z_mae_keys, SIMPLIFIED_CFG_OVERRIDES)
+    run("z", "z_residual_physics_attnpool_jointith", train_cached_mamba_fold_z_residual_attnpool, z_mae_keys, ATTNPOOL_CFG_OVERRIDES)
+    run("z", "z_residual_physics_pretrained_jointith", train_cached_mamba_fold_z_residual_pretrained, z_mae_keys, PRETRAINED_CFG_OVERRIDES)
 
     run("xy", "xy_residual_physics_shrinkage", train_cached_mamba_fold_xy_residual_shrinkage, xy_mae_keys)
     run("xy", "xy_residual_physics_simplified", train_cached_mamba_fold_xy_residual, xy_mae_keys, SIMPLIFIED_CFG_OVERRIDES)
