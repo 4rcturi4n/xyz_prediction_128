@@ -70,6 +70,7 @@ def run(out_dir_name, train_fn, cfg_overrides=None):
     if cfg_overrides:
         cfg.update(cfg_overrides)
     cfg["embeddings_dir"] = os.path.join(ROOT, "results", "dinov2_embeddings_z_with_power")
+    cfg["xy_embeddings_dir"] = os.path.join(ROOT, "results", "dinov2_embeddings_xy_with_power")
     cfg["out_dir"] = os.path.join(ROOT, "results", out_dir_name)
     cfg["split_dir"] = os.path.join(ROOT, "data", "processed", "kfold_splits_z")
     set_seed(cfg["seed"])

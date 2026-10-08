@@ -6,6 +6,14 @@ is trained to predict the RESIDUAL left over after the pure physics fit
 raw target. Physics params fit per fold, TRAIN-only, leak-free, same
 convention as everywhere else in this repo.
 
+I_th is fit JOINTLY across x, y, and z with a single shared value
+(physically: one material/laser threshold power), same approach as
+scripts/16_baseline_physics_joint_shared_ith.py but using the new z
+formula (fit_joint_shared_ith_newhint). This means every training
+function here loads BOTH the xy and z matched fold's train embeddings
+(same video membership by construction), even for a z-only ablation --
+see cfg["xy_embeddings_dir"]/cfg["z_embeddings_dir"].
+
 At evaluation, final_prediction = physics_prediction + model's residual
 prediction, and every reported metric (MAE, bias, EPT, per-timestep
 curves) is computed against the TRUE target using that combined
@@ -23,7 +31,7 @@ import os
 import numpy as np
 import pandas as pd
 import torch
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, least_squares
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from torch.utils.data import Dataset
 
@@ -76,6 +84,30 @@ def fit_axial_newhint(power_mW, target_phys):
     bounds = ([-np.inf, 1e-3, -np.inf], [np.inf, p_min / np.e * 0.999, np.inf])
     popt, _ = curve_fit(axial_model_newhint, power_mW, target_phys, p0=[zr0, ith0, b0], bounds=bounds, maxfev=20000)
     return popt  # zr, i_th, b
+
+
+def fit_joint_shared_ith_newhint(Px, yx, Py, yy, Pz, yz):
+    """Joint fit across x, y, and z simultaneously with a SINGLE shared
+    I_th (physically: one material/laser threshold power), using the new
+    z formula (axial_model_newhint). Same approach as
+    scripts/16_baseline_physics_joint_shared_ith.py's fit_joint, but with
+    the new z formula instead of the old one."""
+    def _residuals(params):
+        w0_x, w0_y, zr, b, ith = params
+        return np.concatenate([
+            lateral_model(Px, w0_x, ith) - yx,
+            lateral_model(Py, w0_y, ith) - yy,
+            axial_model_newhint(Pz, zr, ith, b) - yz,
+        ])
+
+    p_min = float(min(Px.min(), Py.min(), Pz.min()))
+    x0 = [float(yx.max() - yx.min()), float(yy.max() - yy.min()),
+          float(yz.max() - yz.min()), float(yz.min()), p_min / np.e / 2.0]
+    bounds = ([-np.inf, -np.inf, -np.inf, -np.inf, 1e-3],
+              [np.inf, np.inf, np.inf, np.inf, p_min / np.e * 0.999])
+    res = least_squares(_residuals, x0, bounds=bounds, max_nfev=20000)
+    w0_x, w0_y, zr, b, ith = res.x
+    return float(w0_x), float(w0_y), float(zr), float(b), float(ith)
 
 
 # --------------------------------------------------
@@ -364,10 +396,20 @@ def train_cached_mamba_fold_xy_residual(fold: int, cfg: dict, device: torch.devi
 
     train_payload_raw = torch.load(train_path, map_location="cpu", weights_only=False)
     power_train = train_payload_raw["power_mW"].numpy()
-    w0_x, ith_x = fit_lateral(power_train, train_payload_raw["targets_x_phys"].numpy())
-    w0_y, ith_y = fit_lateral(power_train, train_payload_raw["targets_y_phys"].numpy())
-    print(f"Fold {fold} | physics fit (TRAIN only): w0_x={w0_x:.4f} I_th_x={ith_x:.4f}  "
-          f"w0_y={w0_y:.4f} I_th_y={ith_y:.4f}")
+
+    z_fold_dir = os.path.join(cfg["z_embeddings_dir"], f"fold_{fold}")
+    z_train_payload_raw = torch.load(os.path.join(z_fold_dir, "train_embeddings.pt"), map_location="cpu", weights_only=False)
+    power_train_z = z_train_payload_raw["power_mW"].numpy()
+    targets_z_train = z_train_payload_raw["targets_z_phys"].numpy()
+
+    w0_x, w0_y, zr, b, ith = fit_joint_shared_ith_newhint(
+        power_train, train_payload_raw["targets_x_phys"].numpy(),
+        power_train, train_payload_raw["targets_y_phys"].numpy(),
+        power_train_z, targets_z_train,
+    )
+    ith_x = ith_y = ith
+    print(f"Fold {fold} | joint physics fit (TRAIN only, shared I_th): w0_x={w0_x:.4f} w0_y={w0_y:.4f} "
+          f"zr={zr:.4f} b={b:.4f} shared_I_th={ith:.4f}")
     w0_params = (w0_x, ith_x, w0_y, ith_y)
 
     train_dataset = CachedMambaResidualDatasetXY(train_path, w0_params)
@@ -464,7 +506,8 @@ def train_cached_mamba_fold_xy_residual(fold: int, cfg: dict, device: torch.devi
 
     fold_summary = {
         "fold": fold, "best_epoch": best_epoch,
-        "w0_x": float(w0_x), "i_th_x_mW": float(ith_x), "w0_y": float(w0_y), "i_th_y_mW": float(ith_y),
+        "w0_x": float(w0_x), "w0_y": float(w0_y), "zr_joint": float(zr), "b_joint": float(b),
+        "shared_i_th_mW": float(ith),
         "best_val_mae_x_phys": float(best_val_metrics["final_mae_x_phys"]),
         "best_val_mae_y_phys": float(best_val_metrics["final_mae_y_phys"]),
         "best_val_mae_std_x_phys": float(best_val_metrics["final_mae_std_x_phys"]),
@@ -490,8 +533,19 @@ def train_cached_mamba_fold_z_residual(fold: int, cfg: dict, device: torch.devic
 
     train_payload_raw = torch.load(train_path, map_location="cpu", weights_only=False)
     power_train = train_payload_raw["power_mW"].numpy()
-    zr, ith, b = fit_axial_newhint(power_train, train_payload_raw["targets_z_phys"].numpy())
-    print(f"Fold {fold} | physics fit (TRAIN only): zr={zr:.4f} I_th={ith:.4f} b={b:.4f}")
+
+    xy_fold_dir = os.path.join(cfg["xy_embeddings_dir"], f"fold_{fold}")
+    xy_train_payload_raw = torch.load(os.path.join(xy_fold_dir, "train_embeddings.pt"), map_location="cpu", weights_only=False)
+    power_train_xy = xy_train_payload_raw["power_mW"].numpy()
+    targets_x_train = xy_train_payload_raw["targets_x_phys"].numpy()
+    targets_y_train = xy_train_payload_raw["targets_y_phys"].numpy()
+
+    w0_x, w0_y, zr, b, ith = fit_joint_shared_ith_newhint(
+        power_train_xy, targets_x_train, power_train_xy, targets_y_train,
+        power_train, train_payload_raw["targets_z_phys"].numpy(),
+    )
+    print(f"Fold {fold} | joint physics fit (TRAIN only, shared I_th): w0_x={w0_x:.4f} w0_y={w0_y:.4f} "
+          f"zr={zr:.4f} b={b:.4f} shared_I_th={ith:.4f}")
     z_params = (zr, ith, b)
 
     train_dataset = CachedMambaResidualDatasetZ(train_path, z_params)
@@ -583,7 +637,7 @@ def train_cached_mamba_fold_z_residual(fold: int, cfg: dict, device: torch.devic
     )
 
     fold_summary = {
-        "fold": fold, "best_epoch": best_epoch, "zr": float(zr), "i_th_mW": float(ith), "b": float(b),
+        "fold": fold, "best_epoch": best_epoch, "zr": float(zr), "shared_i_th_mW": float(ith), "b": float(b),
         "best_val_mae_z_phys": float(best_val_metrics["final_mae_z_phys"]),
         "best_val_mae_std_z_phys": float(best_val_metrics["final_mae_std_z_phys"]),
         "best_val_rmse_z_phys": float(best_val_metrics["final_rmse_z_phys"]),
@@ -614,8 +668,19 @@ def train_cached_mamba_fold_z_residual_shrinkage(fold: int, cfg: dict, device: t
 
     train_payload_raw = torch.load(train_path, map_location="cpu", weights_only=False)
     power_train = train_payload_raw["power_mW"].numpy()
-    zr, ith, b = fit_axial_newhint(power_train, train_payload_raw["targets_z_phys"].numpy())
-    print(f"Fold {fold} | physics fit (TRAIN only): zr={zr:.4f} I_th={ith:.4f} b={b:.4f}")
+
+    xy_fold_dir = os.path.join(cfg["xy_embeddings_dir"], f"fold_{fold}")
+    xy_train_payload_raw = torch.load(os.path.join(xy_fold_dir, "train_embeddings.pt"), map_location="cpu", weights_only=False)
+    power_train_xy = xy_train_payload_raw["power_mW"].numpy()
+    targets_x_train = xy_train_payload_raw["targets_x_phys"].numpy()
+    targets_y_train = xy_train_payload_raw["targets_y_phys"].numpy()
+
+    w0_x, w0_y, zr, b, ith = fit_joint_shared_ith_newhint(
+        power_train_xy, targets_x_train, power_train_xy, targets_y_train,
+        power_train, train_payload_raw["targets_z_phys"].numpy(),
+    )
+    print(f"Fold {fold} | joint physics fit (TRAIN only, shared I_th): w0_x={w0_x:.4f} w0_y={w0_y:.4f} "
+          f"zr={zr:.4f} b={b:.4f} shared_I_th={ith:.4f}")
     z_params = (zr, ith, b)
 
     train_dataset = CachedMambaResidualDatasetZ(train_path, z_params)
@@ -724,7 +789,7 @@ def train_cached_mamba_fold_z_residual_shrinkage(fold: int, cfg: dict, device: t
     )
 
     fold_summary = {
-        "fold": fold, "best_epoch": best_epoch, "zr": float(zr), "i_th_mW": float(ith), "b": float(b),
+        "fold": fold, "best_epoch": best_epoch, "zr": float(zr), "shared_i_th_mW": float(ith), "b": float(b),
         "alpha": alpha,
         "best_val_mae_z_phys": float(best_val_metrics["final_mae_z_phys"]),
         "best_val_mae_std_z_phys": float(best_val_metrics["final_mae_std_z_phys"]),
@@ -784,8 +849,19 @@ def train_cached_mamba_fold_z_residual_attnpool(fold: int, cfg: dict, device: to
 
     train_payload_raw = torch.load(train_path, map_location="cpu", weights_only=False)
     power_train = train_payload_raw["power_mW"].numpy()
-    zr, ith, b = fit_axial_newhint(power_train, train_payload_raw["targets_z_phys"].numpy())
-    print(f"Fold {fold} | physics fit (TRAIN only): zr={zr:.4f} I_th={ith:.4f} b={b:.4f}")
+
+    xy_fold_dir = os.path.join(cfg["xy_embeddings_dir"], f"fold_{fold}")
+    xy_train_payload_raw = torch.load(os.path.join(xy_fold_dir, "train_embeddings.pt"), map_location="cpu", weights_only=False)
+    power_train_xy = xy_train_payload_raw["power_mW"].numpy()
+    targets_x_train = xy_train_payload_raw["targets_x_phys"].numpy()
+    targets_y_train = xy_train_payload_raw["targets_y_phys"].numpy()
+
+    w0_x, w0_y, zr, b, ith = fit_joint_shared_ith_newhint(
+        power_train_xy, targets_x_train, power_train_xy, targets_y_train,
+        power_train, train_payload_raw["targets_z_phys"].numpy(),
+    )
+    print(f"Fold {fold} | joint physics fit (TRAIN only, shared I_th): w0_x={w0_x:.4f} w0_y={w0_y:.4f} "
+          f"zr={zr:.4f} b={b:.4f} shared_I_th={ith:.4f}")
     z_params = (zr, ith, b)
 
     train_dataset = CachedMambaResidualDatasetZ(train_path, z_params)
@@ -871,7 +947,7 @@ def train_cached_mamba_fold_z_residual_attnpool(fold: int, cfg: dict, device: to
     )
 
     fold_summary = {
-        "fold": fold, "best_epoch": best_epoch, "zr": float(zr), "i_th_mW": float(ith), "b": float(b),
+        "fold": fold, "best_epoch": best_epoch, "zr": float(zr), "shared_i_th_mW": float(ith), "b": float(b),
         "best_val_mae_z_phys": float(best_val_metrics["final_mae_z_phys"]),
         "best_val_mae_std_z_phys": float(best_val_metrics["final_mae_std_z_phys"]),
         "best_val_rmse_z_phys": float(best_val_metrics["final_rmse_z_phys"]),
@@ -945,8 +1021,19 @@ def train_cached_mamba_fold_z_residual_pretrained(fold: int, cfg: dict, device: 
 
     train_payload_raw = torch.load(train_path, map_location="cpu", weights_only=False)
     power_train = train_payload_raw["power_mW"].numpy()
-    zr, ith, b = fit_axial_newhint(power_train, train_payload_raw["targets_z_phys"].numpy())
-    print(f"Fold {fold} | physics fit (TRAIN only): zr={zr:.4f} I_th={ith:.4f} b={b:.4f}")
+
+    xy_fold_dir = os.path.join(cfg["xy_embeddings_dir"], f"fold_{fold}")
+    xy_train_payload_raw = torch.load(os.path.join(xy_fold_dir, "train_embeddings.pt"), map_location="cpu", weights_only=False)
+    power_train_xy = xy_train_payload_raw["power_mW"].numpy()
+    targets_x_train = xy_train_payload_raw["targets_x_phys"].numpy()
+    targets_y_train = xy_train_payload_raw["targets_y_phys"].numpy()
+
+    w0_x, w0_y, zr, b, ith = fit_joint_shared_ith_newhint(
+        power_train_xy, targets_x_train, power_train_xy, targets_y_train,
+        power_train, train_payload_raw["targets_z_phys"].numpy(),
+    )
+    print(f"Fold {fold} | joint physics fit (TRAIN only, shared I_th): w0_x={w0_x:.4f} w0_y={w0_y:.4f} "
+          f"zr={zr:.4f} b={b:.4f} shared_I_th={ith:.4f}")
     z_params = (zr, ith, b)
 
     train_dataset = CachedMambaResidualDatasetZ(train_path, z_params)
@@ -1038,7 +1125,7 @@ def train_cached_mamba_fold_z_residual_pretrained(fold: int, cfg: dict, device: 
     )
 
     fold_summary = {
-        "fold": fold, "best_epoch": best_epoch, "zr": float(zr), "i_th_mW": float(ith), "b": float(b),
+        "fold": fold, "best_epoch": best_epoch, "zr": float(zr), "shared_i_th_mW": float(ith), "b": float(b),
         "best_val_mae_z_phys": float(best_val_metrics["final_mae_z_phys"]),
         "best_val_mae_std_z_phys": float(best_val_metrics["final_mae_std_z_phys"]),
         "best_val_rmse_z_phys": float(best_val_metrics["final_rmse_z_phys"]),

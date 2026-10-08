@@ -31,12 +31,18 @@ BASE_CFG = {
 }
 
 
-def run(embeddings_dir_name, out_dir_name, split_dir_name, n_splits, train_fn, mae_keys):
+def run(embeddings_dir_name, out_dir_name, split_dir_name, n_splits, train_fn, mae_keys,
+        xy_embeddings_dir_name=None, z_embeddings_dir_name=None):
     cfg = deepcopy(BASE_CFG)
     cfg["n_splits"] = n_splits
     cfg["embeddings_dir"] = os.path.join(ROOT, "results", embeddings_dir_name)
     cfg["out_dir"] = os.path.join(ROOT, "results", out_dir_name)
     cfg["split_dir"] = os.path.join(ROOT, "data", "processed", split_dir_name)
+    # joint shared-I_th physics fit needs the matched fold's OTHER axis too
+    if xy_embeddings_dir_name is not None:
+        cfg["xy_embeddings_dir"] = os.path.join(ROOT, "results", xy_embeddings_dir_name)
+    if z_embeddings_dir_name is not None:
+        cfg["z_embeddings_dir"] = os.path.join(ROOT, "results", z_embeddings_dir_name)
     set_seed(cfg["seed"])
     os.makedirs(cfg["out_dir"], exist_ok=True)
     with open(os.path.join(cfg["out_dir"], "config.json"), "w", encoding="utf-8") as f:
@@ -72,13 +78,17 @@ def run(embeddings_dir_name, out_dir_name, split_dir_name, n_splits, train_fn, m
 
 def main():
     run("dinov2_embeddings_xy_with_power", "xy_residual_physics", "kfold_splits_xy", 5,
-        train_cached_mamba_fold_xy_residual, ["best_val_mae_x_phys", "best_val_mae_y_phys"])
+        train_cached_mamba_fold_xy_residual, ["best_val_mae_x_phys", "best_val_mae_y_phys"],
+        z_embeddings_dir_name="dinov2_embeddings_z_with_power")
     run("dinov2_embeddings_xy_loo_batch_with_power", "xy_residual_physics_loo_batch", "kfold_splits_xy_loo_batch", 6,
-        train_cached_mamba_fold_xy_residual, ["best_val_mae_x_phys", "best_val_mae_y_phys"])
+        train_cached_mamba_fold_xy_residual, ["best_val_mae_x_phys", "best_val_mae_y_phys"],
+        z_embeddings_dir_name="dinov2_embeddings_z_loo_batch_with_power")
     run("dinov2_embeddings_z_with_power", "z_residual_physics", "kfold_splits_z", 5,
-        train_cached_mamba_fold_z_residual, ["best_val_mae_z_phys"])
+        train_cached_mamba_fold_z_residual, ["best_val_mae_z_phys"],
+        xy_embeddings_dir_name="dinov2_embeddings_xy_with_power")
     run("dinov2_embeddings_z_loo_batch_with_power", "z_residual_physics_loo_batch", "kfold_splits_z_loo_batch", 6,
-        train_cached_mamba_fold_z_residual, ["best_val_mae_z_phys"])
+        train_cached_mamba_fold_z_residual, ["best_val_mae_z_phys"],
+        xy_embeddings_dir_name="dinov2_embeddings_xy_loo_batch_with_power")
     print("\nALL_RESIDUAL_PHYSICS_DONE")
 
 
