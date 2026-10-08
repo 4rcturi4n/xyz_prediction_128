@@ -1,0 +1,21 @@
+{
+  "n_splits": 5,
+  "n_mamba_layers": 2,
+  "d_state": 16,
+  "d_conv": 4,
+  "expand": 2,
+  "hidden_dim": 128,
+  "dropout": 0.3,
+  "batch_size": 4,
+  "epochs": 100,
+  "lr": 0.001,
+  "weight_decay": 0.0003,
+  "early_stopping_patience": 15,
+  "min_delta": 0.0,
+  "ept_threshold_um": 0.05,
+  "max_trajectory_plots": 10,
+  "seed": 42,
+  "embeddings_dir": "/files/private/notebooks/xyz_prediction_128/results/dinov2_embeddings_z_with_power",
+  "out_dir": "/files/private/notebooks/xyz_prediction_128/results/z_residual_physics_shrinkage",
+  "split_dir": "/files/private/notebooks/xyz_prediction_128/data/processed/kfold_splits_z"
+}

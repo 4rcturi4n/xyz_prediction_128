@@ -1,0 +1,72 @@
+{
+  "n_splits": 5,
+  "mean_best_val_mae_z_phys": 0.02832084335386753,
+  "std_best_val_mae_z_phys": 0.011952534806531957,
+  "folds": [
+    {
+      "fold": 1,
+      "best_epoch": 55,
+      "zr": 4.530125980674166,
+      "shared_i_th_mW": 1.5245742368398667,
+      "b": 0.6497269724712297,
+      "best_val_mae_z_phys": 0.05214012414216995,
+      "best_val_mae_std_z_phys": 0.0957009419798851,
+      "best_val_rmse_z_phys": 0.1089828477431176,
+      "best_val_bias_z_phys": -0.015968479216098785,
+      "num_train_rows": 170,
+      "num_val": 21
+    },
+    {
+      "fold": 2,
+      "best_epoch": 16,
+      "zr": 5.947548780122191,
+      "shared_i_th_mW": 1.0357311210467026,
+      "b": -0.8494375918319197,
+      "best_val_mae_z_phys": 0.022373756393790245,
+      "best_val_mae_std_z_phys": 0.0200818981975317,
+      "best_val_rmse_z_phys": 0.030064389805246002,
+      "best_val_bias_z_phys": 0.0025555179454386234,
+      "num_train_rows": 170,
+      "num_val": 21
+    },
+    {
+      "fold": 3,
+      "best_epoch": 8,
+      "zr": 5.957672594366361,
+      "shared_i_th_mW": 1.0289550973312813,
+      "b": -0.86415299909296,
+      "best_val_mae_z_phys": 0.02190983295440674,
+      "best_val_mae_std_z_phys": 0.02091316133737564,
+      "best_val_rmse_z_phys": 0.030288630949089238,
+      "best_val_bias_z_phys": -0.0058214557357132435,
+      "num_train_rows": 168,
+      "num_val": 22
+    },
+    {
+      "fold": 4,
+      "best_epoch": 24,
+      "zr": 6.034148498338814,
+      "shared_i_th_mW": 1.0295632951429265,
+      "b": -0.9226790893170702,
+      "best_val_mae_z_phys": 0.02414090372622013,
+      "best_val_mae_std_z_phys": 0.02227141708135605,
+      "best_val_rmse_z_phys": 0.032845077776134816,
+      "best_val_bias_z_phys": -0.01774202100932598,
+      "num_train_rows": 170,
+      "num_val": 21
+    },
+    {
+      "fold": 5,
+      "best_epoch": 14,
+      "zr": 5.937390379113479,
+      "shared_i_th_mW": 1.0421645242133288,
+      "b": -0.8296775556358295,
+      "best_val_mae_z_phys": 0.021039599552750587,
+      "best_val_mae_std_z_phys": 0.015057791955769062,
+      "best_val_rmse_z_phys": 0.025872799989664626,
+      "best_val_bias_z_phys": -0.00041459855856373906,
+      "num_train_rows": 170,
+      "num_val": 21
+    }
+  ]
+}

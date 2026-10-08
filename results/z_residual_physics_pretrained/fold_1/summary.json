@@ -1,0 +1,13 @@
+{
+  "fold": 1,
+  "best_epoch": 41,
+  "zr": 4.530125980674166,
+  "shared_i_th_mW": 1.5245742368398667,
+  "b": 0.6497269724712297,
+  "best_val_mae_z_phys": 0.0473596565425396,
+  "best_val_mae_std_z_phys": 0.10419291257858276,
+  "best_val_rmse_z_phys": 0.11445130568090152,
+  "best_val_bias_z_phys": -0.01157468557357788,
+  "num_train_rows": 170,
+  "num_val": 21
+}

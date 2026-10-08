@@ -1,0 +1,19 @@
+{
+  "fold": 4,
+  "best_epoch": 51,
+  "w0_x": 0.37008438219187934,
+  "w0_y": 0.3262481736552207,
+  "zr_joint": 6.034148498338814,
+  "b_joint": -0.9226790893170702,
+  "shared_i_th_mW": 1.0295632951429265,
+  "best_val_mae_x_phys": 0.02574090100824833,
+  "best_val_mae_y_phys": 0.020336169749498367,
+  "best_val_mae_std_x_phys": 0.024487284943461418,
+  "best_val_mae_std_y_phys": 0.01817539520561695,
+  "best_val_rmse_x_phys": 0.03552774999511045,
+  "best_val_rmse_y_phys": 0.02727461807810889,
+  "best_val_bias_x_phys": -0.006217684131115675,
+  "best_val_bias_y_phys": -0.0002268226380692795,
+  "num_train_rows": 170,
+  "num_val": 21
+}

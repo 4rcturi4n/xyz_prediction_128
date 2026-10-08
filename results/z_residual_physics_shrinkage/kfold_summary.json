@@ -1,0 +1,77 @@
+{
+  "n_splits": 5,
+  "mean_best_val_mae_z_phys": 0.03174716830253601,
+  "std_best_val_mae_z_phys": 0.017711304090279132,
+  "folds": [
+    {
+      "fold": 1,
+      "best_epoch": 8,
+      "zr": 4.530125980674166,
+      "shared_i_th_mW": 1.5245742368398667,
+      "b": 0.6497269724712297,
+      "alpha": 0.44688010447870247,
+      "best_val_mae_z_phys": 0.06701133400201797,
+      "best_val_mae_std_z_phys": 0.13671043515205383,
+      "best_val_rmse_z_phys": 0.1522506527221168,
+      "best_val_bias_z_phys": -0.022102603688836098,
+      "num_train_rows": 170,
+      "num_val": 21
+    },
+    {
+      "fold": 2,
+      "best_epoch": 1,
+      "zr": 5.947548780122191,
+      "shared_i_th_mW": 1.0357311210467026,
+      "b": -0.8494375918319197,
+      "alpha": 1.1272422260355235,
+      "best_val_mae_z_phys": 0.025430407375097275,
+      "best_val_mae_std_z_phys": 0.020325716584920883,
+      "best_val_rmse_z_phys": 0.032555188785878965,
+      "best_val_bias_z_phys": -9.931837121257558e-05,
+      "num_train_rows": 170,
+      "num_val": 21
+    },
+    {
+      "fold": 3,
+      "best_epoch": 10,
+      "zr": 5.957672594366361,
+      "shared_i_th_mW": 1.0289550973312813,
+      "b": -0.86415299909296,
+      "alpha": 1.040762232721995,
+      "best_val_mae_z_phys": 0.02259761653840542,
+      "best_val_mae_std_z_phys": 0.0193805955350399,
+      "best_val_rmse_z_phys": 0.029770115470772306,
+      "best_val_bias_z_phys": -0.004273718222975731,
+      "num_train_rows": 168,
+      "num_val": 22
+    },
+    {
+      "fold": 4,
+      "best_epoch": 34,
+      "zr": 6.034148498338814,
+      "shared_i_th_mW": 1.0295632951429265,
+      "b": -0.9226790893170702,
+      "alpha": 0.8304125781862188,
+      "best_val_mae_z_phys": 0.02022084780037403,
+      "best_val_mae_std_z_phys": 0.012036082334816456,
+      "best_val_rmse_z_phys": 0.023531892558110515,
+      "best_val_bias_z_phys": -0.005768276285380125,
+      "num_train_rows": 170,
+      "num_val": 21
+    },
+    {
+      "fold": 5,
+      "best_epoch": 10,
+      "zr": 5.937390379113479,
+      "shared_i_th_mW": 1.0421645242133288,
+      "b": -0.8296775556358295,
+      "alpha": 1.7570005282178636,
+      "best_val_mae_z_phys": 0.023475635796785355,
+      "best_val_mae_std_z_phys": 0.022925812751054764,
+      "best_val_rmse_z_phys": 0.03281308305596989,
+      "best_val_bias_z_phys": -0.0032866683322936296,
+      "num_train_rows": 170,
+      "num_val": 21
+    }
+  ]
+}
